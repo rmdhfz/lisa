@@ -1,5 +1,6 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT license.
+import re
 
 from lisa.base_tools import Service
 from lisa.executable import Tool
@@ -34,6 +35,11 @@ class Firewall(Tool):
         if 0 == cmd_result.exit_code:
             iptables = self.node.tools[Iptables]
             iptables.stop()
+            return
+        cmd_result = self.node.execute("command -v ipf", shell=True)
+        if 0 == cmd_result.exit_code:
+            ipf = self.node.tools[Ipf]
+            ipf.stop()
             return
 
 
@@ -149,3 +155,46 @@ class Firewalld(Tool):
     def stop(self) -> None:
         service = self.node.tools[Service]
         service.stop_service("firewalld")
+
+
+class Ipf(Tool):
+    _ipf_enable_pattern = re.compile(
+        r"(?P<param>ipfilter_enable=):*(?P<value>.*)$", re.MULTILINE
+    )
+
+    @property
+    def command(self) -> str:
+        return "ipf"
+
+    @property
+    def can_install(self) -> bool:
+        return False
+
+    def stop(self) -> None:
+        cmd_result = self.run("cat /etc/rc.conf", shell=True, sudo=True, force_run=True)
+        ipf_enable_found = re.search(self._ipf_enable_pattern, cmd_result.stdout)
+        if ipf_enable_found:
+            self.run(
+                "sed '/ipfilter_enable/s/YES/NO/g' /etc/rc.conf",
+                shell=True,
+                sudo=True,
+                force_run=True,
+            )
+
+    def start(self) -> None:
+        cmd_result = self.run("cat /etc/rc.conf", shell=True, sudo=True, force_run=True)
+        ipf_enable_found = re.search(self._ipf_enable_pattern, cmd_result.stdout)
+        if ipf_enable_found:
+            self.run(
+                "sed '/ipfilter_enable/s/NO/YES/g' /etc/rc.conf",
+                shell=True,
+                sudo=True,
+                force_run=True,
+            )
+        else:
+            self.run(
+                'echo "ipf_enable="YES"" | sudo tee -a /etc/rc.conf >/dev/null',
+                shell=True,
+                sudo=True,
+                force_run=True,
+            )
