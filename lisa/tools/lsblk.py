@@ -126,10 +126,10 @@ class Lsblk(Tool):
         return True
 
     def _install(self) -> bool:
-        if isinstance(self.node.os, Posix):
-            self.node.os.install_packages("util-linux")
-        elif isinstance(self.node.os, FreeBSD):
+        if isinstance(self.node.os, FreeBSD):
             self.node.os.install_packages("lsblk")
+        elif isinstance(self.node.os, Posix):
+            self.node.os.install_packages("util-linux")
         else:
             raise LisaException(
                 f"tool {self.command} can't be installed in distro {self.node.os.name}."
