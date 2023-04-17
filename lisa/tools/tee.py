@@ -2,7 +2,7 @@
 # Licensed under the MIT license.
 
 from pathlib import PurePath
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Type, cast
 
 from lisa.executable import Tool
 from lisa.operating_system import Posix
@@ -22,6 +22,12 @@ class Tee(Tool):
     @property
     def can_install(self) -> bool:
         return self.node.os.is_posix
+    
+    def install(self) -> bool:
+        posix_os: Posix = cast(Posix, self.node.os)
+        package_name = "coreutils"
+        posix_os.install_packages(package_name)
+        return self._check_exists()
 
     def write_to_file(
         self,
@@ -29,8 +35,6 @@ class Tee(Tool):
         file: PurePath,
         append: bool = False,
         sudo: bool = False,
-        *args: Any,
-        **kwargs: Any,
     ) -> None:
         # tee breaks sudo ordering of tool.run()
         # cwd, shell, etc will be passed through to execute
@@ -41,4 +45,4 @@ class Tee(Tool):
         if sudo:
             cmd = f"sudo {cmd}"
         cmd = f"{cmd} {str(file)}"
-        self.node.execute(f"echo '{value}' | {cmd}", *args, **kwargs)
+        self.node.execute(f"echo '{value}' | {cmd}", shell=True)
