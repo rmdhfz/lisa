@@ -18,6 +18,7 @@ from lisa.util import (
     ContextMixin,
     InitializableMixin,
     LisaException,
+    RequireUserPasswordException,
     constants,
     fields_to_dict,
     get_datetime_path,
@@ -102,9 +103,10 @@ class Node(subclasses.BaseClassWithRunbookMixin, ContextMixin, InitializableMixi
         # check if sudo supported
         if self.is_posix and self._support_sudo is None:
             process = self._execute("command -v sudo", shell=True, no_info_log=True)
-            result = process.wait_result(10)
+            result = process.wait_result(5)
             if result.exit_code == 0:
                 self._support_sudo = True
+                self.check_sudo_password_required()
             else:
                 self._support_sudo = False
                 self.log.debug("node doesn't support sudo, may cause failure later.")
@@ -113,6 +115,23 @@ class Node(subclasses.BaseClassWithRunbookMixin, ContextMixin, InitializableMixi
             self._support_sudo = True
 
         return self._support_sudo
+
+    def check_sudo_password_required(self) -> None:
+        # check if password is required when running command with sudo
+        if self.is_remote and self.is_posix:
+            process = self._execute("echo OK", shell=True, sudo=True, no_info_log=True)
+            result = process.wait_result(5)
+            if result.exit_code != 0 and "[sudo] password for" in result.stderr:
+                self.log.debug(
+                    "Running commands with sudo in this node needs input of password."
+                )
+                ssh_shell = cast(SshShell, self.shell)
+                ssh_shell.set_sudo_required_password(True)
+                if not ssh_shell._connection_info.password:
+                    raise RequireUserPasswordException(
+                        "Running commands with sudo requires user's password,"
+                        " but the password is not provided."
+                    )
 
     @property
     def is_connected(self) -> bool:
