@@ -230,6 +230,17 @@ class Process:
         timer = create_timer()
         is_timeout = False
 
+        if (
+            self._sudo
+            and isinstance(self._shell, SshShell)
+            and self._shell._is_sudo_required_password
+        ):
+            # Add a 0.5s delay to make sure the channel is ready to receive
+            time.sleep(0.5)
+            if self.is_running():
+                assert self._process
+                self._process.stdin_write(f"{self._shell._connection_info.password}\n")
+
         while self.is_running() and timeout >= timer.elapsed(False):
             time.sleep(0.01)
 
@@ -248,6 +259,10 @@ class Process:
                     output=self._log_buffer.getvalue(),
                     stderr_output="",
                 )
+                if not process_result.stderr_output:
+                    # When the process is timedout, self._stdout_writer._buffer might
+                    # have some information can tell the timeout reason
+                    process_result.stderr_output = self._stdout_writer._buffer
             else:
                 process_result = self._process.wait_for_result()
             if not self._is_posix and self._shell.is_remote:
@@ -294,6 +309,15 @@ class Process:
         ):
             self._result.stdout = self._filter_profile_error(self._result.stdout)
         self._check_if_need_input_password(self._result.stdout)
+
+        if (
+            self._sudo
+            and isinstance(self._shell, SshShell)
+            and self._shell._is_sudo_required_password
+        ):
+            self._result.stdout = self._filter_sudo_required_password_info(
+                self._result.stdout
+            )
 
         return self._result
 
@@ -410,6 +434,30 @@ class Process:
                 "Running commands with sudo requires user's password,"
                 " which is not support in Lisa now"
             )
+
+    def _filter_sudo_required_password_info(self, raw_input: str) -> str:
+        # If system needs input of password when running commands with sudo, the output
+        # might have below lines:
+        # We trust you have received the usual lecture from the local System
+        # Administrator. It usually boils down to these three things:
+        #
+        #     #1) Respect the privacy of others.
+        #     #2) Think before you type.
+        #     #3) With great power comes great responsibility.
+        #
+        # [sudo] password for l****t:
+        # After inputting the right password, the output might have the following line
+        # when running commands with sudo next time.
+        # [sudo] password for l****t:
+        # Remove these lines
+        if raw_input.startswith("We trust you have received the usual lecture"):
+            lines = raw_input.splitlines(keepends=True)
+            raw_input = "".join(lines[7:])
+        if raw_input.startswith("[sudo] password for"):
+            lines = raw_input.splitlines(keepends=True)
+            raw_input = "".join(lines[1:])
+        self._log.debug("filter the sudo required passwrod string")
+        return raw_input
 
 
 def _create_exports(update_envs: Dict[str, str]) -> str:
